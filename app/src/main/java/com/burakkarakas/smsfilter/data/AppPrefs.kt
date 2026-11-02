@@ -2,6 +2,8 @@ package com.burakkarakas.smsfilter.data
 
 import android.content.Context
 import androidx.core.content.edit
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class RuleKind(val storageKey: String) {
     BLOCKED_SENDER("blocked_senders"),
@@ -9,7 +11,7 @@ enum class RuleKind(val storageKey: String) {
     BLOCKED_KEYWORD("blocked_keywords"),
 }
 
-/** Ayarlar, kurallar ve mesaj etiketleri. Veriler yalnızca bu uygulamanın kendi alanında tutulur. */
+/** Ayarlar, kurallar, mesaj etiketleri ve yapay zekaya örnek olarak verilen geçmiş kararlar. */
 class AppPrefs(context: Context) {
     private val prefs = context.getSharedPreferences("sms_filter", Context.MODE_PRIVATE)
 
@@ -21,11 +23,19 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_AI_ENABLED, false)
         set(value) = prefs.edit { putBoolean(KEY_AI_ENABLED, value) }
 
-    fun rules(kind: RuleKind): List<String> =
-        prefs.getStringSet(kind.storageKey, emptySet()).orEmpty().sorted()
+    fun rules(kind: RuleKind): List<String> {
+        val values = prefs.getStringSet(kind.storageKey, emptySet()).orEmpty()
+        return when (kind) {
+            RuleKind.BLOCKED_KEYWORD -> values.sorted()
+            RuleKind.BLOCKED_SENDER, RuleKind.ALLOWED_SENDER -> values.map { senderKey(it) }.distinct().sorted()
+        }
+    }
 
     fun addRule(kind: RuleKind, value: String) {
-        val cleaned = value.trim()
+        val cleaned = when (kind) {
+            RuleKind.BLOCKED_KEYWORD -> value.trim().lowercase(TURKISH_LOCALE)
+            RuleKind.BLOCKED_SENDER, RuleKind.ALLOWED_SENDER -> senderKey(value)
+        }
         if (cleaned.isEmpty()) return
         val updated = prefs.getStringSet(kind.storageKey, emptySet()).orEmpty().toMutableSet()
         updated.add(cleaned)
@@ -34,7 +44,10 @@ class AppPrefs(context: Context) {
 
     fun removeRule(kind: RuleKind, value: String) {
         val updated = prefs.getStringSet(kind.storageKey, emptySet()).orEmpty().toMutableSet()
-        updated.remove(value)
+        when (kind) {
+            RuleKind.BLOCKED_KEYWORD -> updated.remove(value)
+            RuleKind.BLOCKED_SENDER, RuleKind.ALLOWED_SENDER -> updated.removeAll { senderKey(it) == value }
+        }
         prefs.edit { putStringSet(kind.storageKey, updated) }
     }
 
@@ -48,11 +61,39 @@ class AppPrefs(context: Context) {
         prefs.edit { putString(labelKey(messageId, manual), label.name) }
     }
 
+    /** En yeni örnekler başta. Yapay zekaya "daha önce bu tür mesajları şöyle sınıflandırdık" diye verilir. */
+    fun examples(): List<Example> {
+        val raw = prefs.getString(KEY_EXAMPLES, null) ?: "[]"
+        val array = runCatching { JSONArray(raw) }.getOrElse { JSONArray() }
+        return (0 until array.length())
+            .mapNotNull { array.optJSONObject(it) }
+            .mapNotNull { obj ->
+                val label = runCatching { Label.valueOf(obj.getString("label")) }.getOrNull()
+                label?.let { Example(it, obj.optString("sender"), obj.optString("text")) }
+            }
+    }
+
+    fun addExample(label: Label, sender: String, text: String) {
+        val array = JSONArray()
+        array.put(JSONObject().put("label", label.name).put("sender", sender).put("text", text.take(300)))
+        examples().take(MAX_EXAMPLES - 1).forEach { example ->
+            array.put(
+                JSONObject()
+                    .put("label", example.label.name)
+                    .put("sender", example.sender)
+                    .put("text", example.text),
+            )
+        }
+        prefs.edit { putString(KEY_EXAMPLES, array.toString()) }
+    }
+
     private fun labelKey(messageId: Long, manual: Boolean) =
         "${if (manual) "manual" else "ai"}_$messageId"
 
     private companion object {
         const val KEY_API_KEY = "deepseek_api_key"
         const val KEY_AI_ENABLED = "ai_enabled"
+        const val KEY_EXAMPLES = "examples"
+        const val MAX_EXAMPLES = 30
     }
 }

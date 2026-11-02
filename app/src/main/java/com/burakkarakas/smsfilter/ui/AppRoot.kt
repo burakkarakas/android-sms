@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -69,7 +70,14 @@ fun AppRoot(vm: SmsViewModel = viewModel()) {
             onOpenFilters = { screen = Screen.Filters },
             onOpenSettings = { screen = Screen.Settings },
         )
-        is Screen.Chat -> ChatScreen(vm = vm, address = current.address, onBack = { screen = Screen.Home })
+        is Screen.Chat -> key(current.address) {
+            ChatScreen(
+                vm = vm,
+                address = current.address,
+                onBack = { screen = Screen.Home },
+                onOpenChat = { screen = Screen.Chat(it) },
+            )
+        }
         Screen.Filters -> FilterScreen(vm = vm, onBack = { screen = Screen.Home })
         Screen.Settings -> SettingsScreen(vm = vm, onBack = { screen = Screen.Home })
     }

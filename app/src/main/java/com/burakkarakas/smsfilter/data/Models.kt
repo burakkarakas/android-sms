@@ -24,3 +24,15 @@ data class Conversation(
     val unread: Int,
     val label: Label,
 )
+
+data class Contact(
+    val name: String,
+    val number: String,
+)
+
+/** Yapay zekaya örnek olarak verilen, daha önce verilmiş bir karar. */
+data class Example(
+    val label: Label,
+    val sender: String,
+    val text: String,
+)

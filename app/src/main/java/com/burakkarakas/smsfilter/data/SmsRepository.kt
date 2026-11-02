@@ -2,36 +2,73 @@ package com.burakkarakas.smsfilter.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
 import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SmsManager
 
-/** Sistemin SMS veritabanı üzerinde okuma, yazma ve gönderme işlemleri. */
+/** Sistemin SMS ve rehber veritabanı üzerinde okuma, yazma ve gönderme işlemleri. */
 class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
 
     private val resolver = context.contentResolver
     private val classifier = SpamClassifier(prefs)
-    private val nameCache = HashMap<String, String?>()
 
-    fun loadMessages(limit: Int = 3000): List<SmsItem> =
-        query(extra = null, extraArgs = null, sort = "${Telephony.Sms.DATE} DESC LIMIT $limit")
+    fun loadContacts(): List<Contact> {
+        val contacts = mutableListOf<Contact>()
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+        )
+        // Rehber izni yoksa boş liste döner.
+        runCatching {
+            resolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, null)
+                ?.use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val number = cursor.getString(1)
+                        if (number != null) contacts += Contact(cursor.getString(0).orEmpty(), number)
+                    }
+                }
+        }
+        return contacts
+    }
 
-    fun loadThread(address: String): List<SmsItem> =
+    fun filterContext(contacts: List<Contact> = loadContacts()): FilterContext = FilterContext(
+        blockedSenders = prefs.rules(RuleKind.BLOCKED_SENDER).toSet(),
+        allowedSenders = prefs.rules(RuleKind.ALLOWED_SENDER).toSet(),
+        blockedKeywords = prefs.rules(RuleKind.BLOCKED_KEYWORD),
+        contactNames = contacts.associate { senderKey(it.number) to it.name.ifBlank { it.number } },
+    )
+
+    fun loadMessages(contacts: List<Contact> = loadContacts(), limit: Int = 3000): List<SmsItem> =
         query(
-            extra = "${Telephony.Sms.ADDRESS} = ?",
-            extraArgs = arrayOf(address),
-            sort = "${Telephony.Sms.DATE} DESC",
+            extra = null,
+            extraArgs = null,
+            sort = "${Telephony.Sms.DATE} DESC LIMIT $limit",
+            ctx = filterContext(contacts),
         )
 
-    fun toConversations(all: List<SmsItem>): List<Conversation> =
-        all.groupBy { it.address }
-            .map { (address, items) ->
-                // Liste tarihe göre azalan sırada geliyor; ilk öğe en son mesaj.
+    fun loadThread(address: String, contacts: List<Contact> = loadContacts()): List<SmsItem> {
+        val key = senderKey(address)
+        // Numaralarda son 10 hane eşleşsin diye LIKE kullanılır (+90 ya da 0 öneki fark etmesin).
+        val isNumber = address.count { it.isDigit() } >= 7
+        val extra = if (isNumber) "${Telephony.Sms.ADDRESS} LIKE ?" else "${Telephony.Sms.ADDRESS} = ?"
+        val arg = if (isNumber) "%$key" else address.trim()
+        return query(
+            extra = extra,
+            extraArgs = arrayOf(arg),
+            sort = "${Telephony.Sms.DATE} DESC LIMIT 3000",
+            ctx = filterContext(contacts),
+        ).filter { senderKey(it.address) == key }
+    }
+
+    fun toConversations(all: List<SmsItem>, contacts: List<Contact>): List<Conversation> {
+        val names = contacts.associate { senderKey(it.number) to it.name.ifBlank { it.number } }
+        return all.groupBy { senderKey(it.address) }
+            .map { (key, items) ->
+                // Liste tarihe göre azalan sırada; ilk öğe en son mesaj.
                 val last = items.first()
                 Conversation(
-                    address = address,
-                    name = contactName(address),
+                    address = last.address,
+                    name = names[key],
                     lastBody = last.body,
                     lastDate = last.date,
                     unread = items.count { it.isInbox && !it.read },
@@ -39,20 +76,21 @@ class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
                 )
             }
             .sortedByDescending { it.lastDate }
-
-    fun markRead(address: String) {
-        val values = ContentValues().apply {
-            put(Telephony.Sms.READ, 1)
-            put(Telephony.Sms.SEEN, 1)
-        }
-        resolver.update(
-            Telephony.Sms.Inbox.CONTENT_URI,
-            values,
-            "${Telephony.Sms.ADDRESS} = ? AND ${Telephony.Sms.READ} = 0",
-            arrayOf(address),
-        )
     }
 
+    fun markRead(address: String) {
+        loadThread(address)
+            .filter { it.isInbox && !it.read }
+            .forEach { item ->
+                val values = ContentValues().apply {
+                    put(Telephony.Sms.READ, 1)
+                    put(Telephony.Sms.SEEN, 1)
+                }
+                resolver.update(Telephony.Sms.CONTENT_URI, values, "${Telephony.Sms._ID} = ?", arrayOf(item.id.toString()))
+            }
+    }
+
+    /** Mesajı gönderir ve sistem geçmişine yazar. Hata olursa exception fırlatır. */
     fun send(address: String, body: String) {
         val smsManager = context.getSystemService(SmsManager::class.java)
         smsManager.sendMultipartTextMessage(address, null, smsManager.divideMessage(body), null, null)
@@ -70,16 +108,13 @@ class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
     /** Gelen mesajı kaydeder, sınıflandırır ve etiketini döndürür. */
     fun receive(address: String, body: String, date: Long): Label? {
         val id = saveIncoming(address, body, date) ?: return null
-        val quick = classifier.quick(address, body, isContact(address))
-        val ai = if (quick == null) classifier.askAi(address, body) else null
+        val explicit = classifier.explicit(address, body, filterContext())
+        val ai = if (explicit == null) classifier.askAi(address, body) else null
         if (ai != null) prefs.setLabel(id, ai, manual = false)
-        return quick ?: ai ?: Label.NORMAL
+        val label = explicit ?: ai ?: classifier.heuristic(body)
+        if (label == Label.SPAM) prefs.addExample(label, address, body)
+        return label
     }
-
-    fun contactName(address: String): String? =
-        nameCache.getOrPut(address) { runCatching { queryContactName(address) }.getOrNull() }
-
-    private fun isContact(address: String): Boolean = contactName(address) != null
 
     private fun saveIncoming(address: String, body: String, date: Long): Long? {
         val values = ContentValues().apply {
@@ -93,15 +128,7 @@ class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
         return resolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)?.lastPathSegment?.toLongOrNull()
     }
 
-    private fun queryContactName(address: String): String? {
-        val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address))
-        resolver.query(uri, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) return cursor.getString(0)
-        }
-        return null
-    }
-
-    private fun query(extra: String?, extraArgs: Array<String>?, sort: String): List<SmsItem> {
+    private fun query(extra: String?, extraArgs: Array<String>?, sort: String, ctx: FilterContext): List<SmsItem> {
         val selection = listOfNotNull("${Telephony.Sms.TYPE} IN (?, ?)", extra).joinToString(" AND ")
         val selectionArgs = arrayOf(
             Telephony.Sms.MESSAGE_TYPE_INBOX.toString(),
@@ -130,18 +157,18 @@ class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
                     date = cursor.getLong(3),
                     isInbox = isInbox,
                     read = cursor.getInt(5) == 1,
-                    label = labelOf(id, address, body, isInbox),
+                    label = labelOf(id, address, body, isInbox, ctx),
                 )
             }
         }
         return items
     }
 
-    private fun labelOf(id: Long, address: String, body: String, isInbox: Boolean): Label {
+    private fun labelOf(id: Long, address: String, body: String, isInbox: Boolean, ctx: FilterContext): Label {
         if (!isInbox) return Label.NORMAL
         return prefs.getLabel(id, manual = true)
-            ?: classifier.quick(address, body, isContact(address))
+            ?: classifier.explicit(address, body, ctx)
             ?: prefs.getLabel(id, manual = false)
-            ?: Label.NORMAL
+            ?: classifier.heuristic(body)
     }
 }

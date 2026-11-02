@@ -32,6 +32,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PullToRefreshBox
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -69,6 +70,7 @@ fun HomeScreen(
 ) {
     val conversations by vm.conversations.collectAsState()
     val spam by vm.spam.collectAsState()
+    val loading by vm.loading.collectAsState()
     val isDefault = isDefaultSmsApp(LocalContext.current)
     var tab by remember { mutableStateOf(HomeTab.ALL) }
 
@@ -114,42 +116,48 @@ fun HomeScreen(
                 }
             }
 
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (!isDefault) {
-                    item { DefaultAppBanner(onOpenSettings) }
-                }
-                if (isEmpty) {
-                    item {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(32.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "Bu kategoride mesaj yok",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+            PullToRefreshBox(
+                isRefreshing = loading,
+                onRefresh = { vm.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    if (!isDefault) {
+                        item { DefaultAppBanner(onOpenSettings) }
+                    }
+                    if (isEmpty) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(32.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "Bu kategoride mesaj yok",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
-                }
-                if (tab == HomeTab.SPAM) {
-                    items(spam, key = { it.id }) { item ->
-                        ListRow(
-                            title = item.address,
-                            subtitle = item.body,
-                            date = item.date,
-                            unread = 0,
-                            onClick = { onOpenChat(item.address) },
-                        )
-                    }
-                } else {
-                    items(visible, key = { it.address }) { conversation ->
-                        ListRow(
-                            title = conversation.name ?: conversation.address,
-                            subtitle = conversation.lastBody,
-                            date = conversation.lastDate,
-                            unread = conversation.unread,
-                            onClick = { onOpenChat(conversation.address) },
-                        )
+                    if (tab == HomeTab.SPAM) {
+                        items(spam, key = { it.id }) { item ->
+                            ListRow(
+                                title = item.address,
+                                subtitle = item.body,
+                                date = item.date,
+                                unread = 0,
+                                onClick = { onOpenChat(item.address) },
+                            )
+                        }
+                    } else {
+                        items(visible, key = { it.address }) { conversation ->
+                            ListRow(
+                                title = conversation.name ?: conversation.address,
+                                subtitle = conversation.lastBody,
+                                date = conversation.lastDate,
+                                unread = conversation.unread,
+                                onClick = { onOpenChat(conversation.address) },
+                            )
+                        }
                     }
                 }
             }

@@ -1,5 +1,6 @@
 package com.burakkarakas.smsfilter.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -33,35 +34,58 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.burakkarakas.smsfilter.data.Contact
 import com.burakkarakas.smsfilter.data.RuleKind
 import com.burakkarakas.smsfilter.data.SmsItem
+import com.burakkarakas.smsfilter.data.senderKey
 
-/** address boşsa yeni mesaj ekranıdır ve alıcı numarayı kullanıcıdan ister. */
+/** address boşsa yeni mesaj ekranıdır: alıcıyı numarayla ya da rehberden seçerek belirlenir. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(vm: SmsViewModel, address: String, onBack: () -> Unit) {
+fun ChatScreen(
+    vm: SmsViewModel,
+    address: String,
+    onBack: () -> Unit,
+    onOpenChat: (String) -> Unit,
+) {
     val thread by vm.thread.collectAsState()
-    val conversations by vm.conversations.collectAsState()
-    var recipient by remember { mutableStateOf(address) }
+    val contacts by vm.contacts.collectAsState()
+    var recipient by remember { mutableStateOf("") }
     var text by remember { mutableStateOf("") }
 
-    val target = if (address.isBlank()) recipient.trim() else address
-    val title = conversations.firstOrNull { it.address == address }?.name
-        ?: address.ifBlank { "Yeni mesaj" }
+    val isNew = address.isBlank()
+    val target = if (isNew) recipient.trim() else address
+    val contactName = if (isNew) {
+        null
+    } else {
+        contacts.firstOrNull { senderKey(it.number) == senderKey(address) }?.name
+    }
+    val suggestions = if (isNew && recipient.isNotBlank()) {
+        contacts.filter { matches(it, recipient.trim()) }.take(5)
+    } else {
+        emptyList()
+    }
 
     LaunchedEffect(address) {
-        if (address.isNotBlank()) vm.openThread(address)
+        if (!isNew) vm.openThread(address)
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    Text(
+                        contactName ?: if (isNew) "Yeni mesaj" else address,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
-                    if (address.isNotBlank()) {
+                    if (!isNew) {
                         IconButton(onClick = {
                             vm.addRule(RuleKind.BLOCKED_SENDER, address)
                             onBack()
@@ -87,8 +111,11 @@ fun ChatScreen(vm: SmsViewModel, address: String, onBack: () -> Unit) {
                 )
                 IconButton(
                     onClick = {
-                        vm.send(target, text)
-                        text = ""
+                        vm.send(target, text) {
+                            text = ""
+                            // Yeni mesajdan gönderildiyse o kişinin sohbetine geç.
+                            if (isNew) onOpenChat(target)
+                        }
                     },
                     enabled = text.isNotBlank() && target.isNotBlank(),
                 ) {
@@ -98,14 +125,30 @@ fun ChatScreen(vm: SmsViewModel, address: String, onBack: () -> Unit) {
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            if (address.isBlank()) {
+            if (isNew) {
                 OutlinedTextField(
                     value = recipient,
                     onValueChange = { recipient = it },
-                    label = { Text("Alıcı numara") },
+                    label = { Text("Alıcı") },
+                    placeholder = { Text("Numara veya kişi adı") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 )
+                suggestions.forEach { contact ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenChat(contact.number) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                    ) {
+                        Text(contact.name.ifBlank { contact.number }, fontWeight = FontWeight.Bold)
+                        Text(
+                            contact.number,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
             LazyColumn(
                 // Liste ters çevrildi: en yeni mesaj en altta görünür.
@@ -118,6 +161,12 @@ fun ChatScreen(vm: SmsViewModel, address: String, onBack: () -> Unit) {
             }
         }
     }
+}
+
+private fun matches(contact: Contact, query: String): Boolean {
+    val digits = query.filter { it.isDigit() }
+    return contact.name.contains(query, ignoreCase = true) ||
+        (digits.length >= 3 && contact.number.filter { it.isDigit() }.contains(digits))
 }
 
 @Composable
