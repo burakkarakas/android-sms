@@ -2,6 +2,10 @@ package com.burakkarakas.smsfilter.ui
 
 import android.app.Application
 import android.widget.Toast
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.burakkarakas.smsfilter.data.AppPrefs
@@ -45,7 +49,11 @@ class SmsViewModel(application: Application) : AndroidViewModel(application) {
     private val _testStatus = MutableStateFlow<String?>(null)
     val testStatus: StateFlow<String?> = _testStatus.asStateFlow()
 
-    private val _ruleStatus = MutableStateFlow<String?>(null)
+    /** Ana liste ekrandan çıkıp dönünce kaldığı yerden devam etsin diye ekran dışında tutulur. */
+    val homeListState = LazyListState()
+    var homeTabIndex by mutableIntStateOf(0)
+
+    private val _ruleStatus =MutableStateFlow<String?>(null)
     val ruleStatus: StateFlow<String?> = _ruleStatus.asStateFlow()
 
     @Volatile

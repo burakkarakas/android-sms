@@ -43,6 +43,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,7 +77,8 @@ fun HomeScreen(
     val spam by vm.spam.collectAsState()
     val loading by vm.loading.collectAsState()
     val isDefault = isDefaultSmsApp(LocalContext.current)
-    var tab by remember { mutableStateOf(HomeTab.ALL) }
+    val tab = HomeTab.entries[vm.homeTabIndex]
+    val scope = rememberCoroutineScope()
     var spamBySender by remember { mutableStateOf(false) }
     val spamSenders = spam.groupBy { senderKey(it.address) }.values
         .map { it.first().address to it.size }
@@ -122,7 +125,10 @@ fun HomeScreen(
                 items(HomeTab.entries) { option ->
                     FilterChip(
                         selected = tab == option,
-                        onClick = { tab = option },
+                        onClick = {
+                            vm.homeTabIndex = option.ordinal
+                            scope.launch { vm.homeListState.scrollToItem(0) }
+                        },
                         label = { Text(option.title) },
                     )
                 }
@@ -133,7 +139,7 @@ fun HomeScreen(
                 onRefresh = { vm.refresh() },
                 modifier = Modifier.weight(1f),
             ) {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(state = vm.homeListState, modifier = Modifier.fillMaxSize()) {
                     if (!isDefault) {
                         item { DefaultAppBanner(onOpenSettings) }
                     }
