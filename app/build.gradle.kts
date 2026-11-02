@@ -12,8 +12,19 @@ android {
         applicationId = "com.burakkarakas.smsfilter"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
+        // Her CI derlemesinde artar, böylece telefon yeni APK'yı güncelleme olarak görür.
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionName = "1.0"
+    }
+
+    // Her derleme aynı anahtarla imzalansın ki telefonda üstüne güncelleme olarak kurulabilsin.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("burksms-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
