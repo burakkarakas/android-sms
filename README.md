@@ -1,4 +1,4 @@
-# Akıllı SMS
+# BurkSMS
 
 Samsung S23 (Android 10+) için kendi SMS uygulaman. Gelen mesajları kurallarla ve isteğe bağlı DeepSeek yapay zekasıyla filtreler.
 
