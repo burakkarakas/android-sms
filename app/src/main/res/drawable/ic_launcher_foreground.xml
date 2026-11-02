@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Sohbet balonu: SMS uygulamasının simgesi -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M30,34 L78,34 Q86,34 86,42 L86,64 Q86,72 78,72 L54,72 L40,84 L40,72 L30,72 Q22,72 22,64 L22,42 Q22,34 30,34 Z" />
+    <!-- Üç nokta -->
+    <path
+        android:fillColor="#FF2F8CFF"
+        android:pathData="M37,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M50,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z M63,50 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z" />
+</vector>
