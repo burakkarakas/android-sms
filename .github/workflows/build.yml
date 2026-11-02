@@ -24,7 +24,16 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --no-daemon 2>&1 | tee build.log
+
+      # Derleme hatalarını annotation olarak yayınlar; giriş yapmadan Actions sayfasında görünür.
+      - name: Report build errors
+        if: failure()
+        run: |
+          errors=$(grep -E '^e: |What went wrong' -A3 build.log | head -60 | sed 's/%/%25/g' | tr '\n' '|')
+          echo "::error title=Build errors::${errors}"
 
       - uses: actions/upload-artifact@v4
         with:
