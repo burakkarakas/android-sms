@@ -75,7 +75,13 @@ class SmsViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) { toast("Gönderilemedi: ${error.message}") }
                 return@launch
             }
-            _thread.value = runCatching { repo.loadThread(address) }.getOrDefault(emptyList())
+            val now = System.currentTimeMillis()
+            val loaded = runCatching { repo.loadThread(address) }.getOrDefault(emptyList())
+            // Sistem kaydına yazılamadıysa bile gönderilen mesaj ekranda görünsün.
+            val saved = loaded.any { !it.isInbox && it.body == body && now - it.date < 60_000 }
+            _thread.value = if (saved) loaded else {
+                listOf(SmsItem(-now, address, body, now, isInbox = false, read = true, label = Label.NORMAL)) + loaded
+            }
             runCatching { reload() }
             withContext(Dispatchers.Main) { onSent() }
         }

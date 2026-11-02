@@ -100,9 +100,10 @@ class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
             put(Telephony.Sms.BODY, body)
             put(Telephony.Sms.DATE, System.currentTimeMillis())
             put(Telephony.Sms.READ, 1)
+            put(Telephony.Sms.SEEN, 1)
             put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
         }
-        resolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+        runCatching { resolver.insert(Telephony.Sms.Sent.CONTENT_URI, values) }
     }
 
     /** Gelen mesajı kaydeder, sınıflandırır ve etiketini döndürür. */
@@ -129,10 +130,14 @@ class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
     }
 
     private fun query(extra: String?, extraArgs: Array<String>?, sort: String, ctx: FilterContext): List<SmsItem> {
-        val selection = listOfNotNull("${Telephony.Sms.TYPE} IN (?, ?)", extra).joinToString(" AND ")
+        // Gönderilen mesajlar sıra/hata durumunda (outbox, failed, queued) da görünsün.
+        val selection = listOfNotNull("${Telephony.Sms.TYPE} IN (?, ?, ?, ?, ?)", extra).joinToString(" AND ")
         val selectionArgs = arrayOf(
             Telephony.Sms.MESSAGE_TYPE_INBOX.toString(),
             Telephony.Sms.MESSAGE_TYPE_SENT.toString(),
+            Telephony.Sms.MESSAGE_TYPE_OUTBOX.toString(),
+            Telephony.Sms.MESSAGE_TYPE_FAILED.toString(),
+            Telephony.Sms.MESSAGE_TYPE_QUEUED.toString(),
         ) + (extraArgs ?: emptyArray<String>())
         val projection = arrayOf(
             Telephony.Sms._ID,
