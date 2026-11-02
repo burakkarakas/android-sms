@@ -9,6 +9,9 @@ enum class RuleKind(val storageKey: String) {
     BLOCKED_SENDER("blocked_senders"),
     ALLOWED_SENDER("allowed_senders"),
     BLOCKED_KEYWORD("blocked_keywords"),
+
+    /** Yapay zekanın spam mesajlardan çıkardığı ya da kullanıcının yazdığı serbest metin kurallar. */
+    AI_RULE("ai_rules"),
 }
 
 /** Ayarlar, kurallar, mesaj etiketleri ve yapay zekaya örnek olarak verilen geçmiş kararlar. */
@@ -26,7 +29,7 @@ class AppPrefs(context: Context) {
     fun rules(kind: RuleKind): List<String> {
         val values = prefs.getStringSet(kind.storageKey, emptySet()).orEmpty()
         return when (kind) {
-            RuleKind.BLOCKED_KEYWORD -> values.sorted()
+            RuleKind.BLOCKED_KEYWORD, RuleKind.AI_RULE -> values.sorted()
             RuleKind.BLOCKED_SENDER, RuleKind.ALLOWED_SENDER -> values.map { senderKey(it) }.distinct().sorted()
         }
     }
@@ -34,6 +37,7 @@ class AppPrefs(context: Context) {
     fun addRule(kind: RuleKind, value: String) {
         val cleaned = when (kind) {
             RuleKind.BLOCKED_KEYWORD -> value.trim().lowercase(TURKISH_LOCALE)
+            RuleKind.AI_RULE -> value.trim().take(200)
             RuleKind.BLOCKED_SENDER, RuleKind.ALLOWED_SENDER -> senderKey(value)
         }
         if (cleaned.isEmpty()) return
@@ -45,7 +49,7 @@ class AppPrefs(context: Context) {
     fun removeRule(kind: RuleKind, value: String) {
         val updated = prefs.getStringSet(kind.storageKey, emptySet()).orEmpty().toMutableSet()
         when (kind) {
-            RuleKind.BLOCKED_KEYWORD -> updated.remove(value)
+            RuleKind.BLOCKED_KEYWORD, RuleKind.AI_RULE -> updated.remove(value)
             RuleKind.BLOCKED_SENDER, RuleKind.ALLOWED_SENDER -> updated.removeAll { senderKey(it) == value }
         }
         prefs.edit { putStringSet(kind.storageKey, updated) }

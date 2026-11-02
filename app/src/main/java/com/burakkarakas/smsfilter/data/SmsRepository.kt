@@ -90,6 +90,14 @@ class SmsRepository(private val context: Context, private val prefs: AppPrefs) {
             }
     }
 
+    fun markAllRead() {
+        val values = ContentValues().apply {
+            put(Telephony.Sms.READ, 1)
+            put(Telephony.Sms.SEEN, 1)
+        }
+        resolver.update(Telephony.Sms.Inbox.CONTENT_URI, values, "${Telephony.Sms.READ} = 0", null)
+    }
+
     /** Mesajı gönderir ve sistem geçmişine yazar. Hata olursa exception fırlatır. */
     fun send(address: String, body: String) {
         val smsManager = context.getSystemService(SmsManager::class.java)

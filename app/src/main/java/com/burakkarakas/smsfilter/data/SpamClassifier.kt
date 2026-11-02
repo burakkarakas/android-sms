@@ -25,7 +25,7 @@ class SpamClassifier(private val prefs: AppPrefs) {
     fun askAi(address: String, body: String): Label? {
         val key = prefs.apiKey
         if (!prefs.aiEnabled || key.isBlank()) return null
-        return DeepSeekClient.classify(key, address, body, prefs.examples()).getOrNull()
+        return DeepSeekClient.classify(key, address, body, prefs.examples(), prefs.rules(RuleKind.AI_RULE)).getOrNull()
     }
 
     /** Yapay zeka kullanılamadığında kelime analizi. */

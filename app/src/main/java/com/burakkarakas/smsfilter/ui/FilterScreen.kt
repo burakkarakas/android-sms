@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ import com.burakkarakas.smsfilter.data.RuleKind
 fun FilterScreen(vm: SmsViewModel, onBack: () -> Unit) {
     val spam by vm.spam.collectAsState()
     val rules by vm.rules.collectAsState()
+    val ruleStatus by vm.ruleStatus.collectAsState()
 
     Scaffold(
         topBar = {
@@ -82,6 +84,24 @@ fun FilterScreen(vm: SmsViewModel, onBack: () -> Unit) {
             }
 
             HorizontalDivider()
+            Text("Yapay zeka kuralları", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Spam klasöründeki mesajlardan kural çıkarılır. Beğenmediğin kuralı sil, kendi kuralını " +
+                    "ekleyebilirsin. Gelen mesajlar bu kurallara göre değerlendirilir.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = { vm.generateRules() }) { Text("Spam'den kural çıkar") }
+            ruleStatus?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            RuleEditor(
+                title = "Kurallar",
+                hint = "Örn: Bahis sitesi reklamları spamdir",
+                values = rules[RuleKind.AI_RULE].orEmpty(),
+                onAdd = { vm.addRule(RuleKind.AI_RULE, it) },
+                onRemove = { vm.removeRule(RuleKind.AI_RULE, it) },
+                singleLine = false,
+            )
+
+            HorizontalDivider()
             RuleEditor(
                 title = "Engellenen gönderenler",
                 hint = "Numara veya gönderen adı",
@@ -118,6 +138,7 @@ private fun RuleEditor(
     values: List<String>,
     onAdd: (String) -> Unit,
     onRemove: (String) -> Unit,
+    singleLine: Boolean = true,
 ) {
     var input by remember { mutableStateOf("") }
 
@@ -127,7 +148,7 @@ private fun RuleEditor(
             value = input,
             onValueChange = { input = it },
             placeholder = { Text(hint) },
-            singleLine = true,
+            singleLine = singleLine,
             modifier = Modifier.weight(1f),
         )
         IconButton(
@@ -142,7 +163,12 @@ private fun RuleEditor(
     }
     values.forEach { value ->
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(value, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                value,
+                modifier = Modifier.weight(1f),
+                maxLines = if (singleLine) 1 else 4,
+                overflow = TextOverflow.Ellipsis,
+            )
             IconButton(onClick = { onRemove(value) }) {
                 Icon(Icons.Default.Close, contentDescription = "Kaldır")
             }

@@ -8,6 +8,7 @@ import com.burakkarakas.smsfilter.data.AppPrefs
 import com.burakkarakas.smsfilter.data.Contact
 import com.burakkarakas.smsfilter.data.Conversation
 import com.burakkarakas.smsfilter.data.DeepSeekClient
+import com.burakkarakas.smsfilter.data.Example
 import com.burakkarakas.smsfilter.data.Label
 import com.burakkarakas.smsfilter.data.RuleKind
 import com.burakkarakas.smsfilter.data.SmsItem
@@ -44,7 +45,13 @@ class SmsViewModel(application: Application) : AndroidViewModel(application) {
     private val _testStatus = MutableStateFlow<String?>(null)
     val testStatus: StateFlow<String?> = _testStatus.asStateFlow()
 
-    private val _loading = MutableStateFlow(false)
+    private val _ruleStatus = MutableStateFlow<String?>(null)
+    val ruleStatus: StateFlow<String?> = _ruleStatus.asStateFlow()
+
+    @Volatile
+    private var allMessages: List<SmsItem> = emptyList()
+
+    private val _loading =MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
     val apiKey: String get() = prefs.apiKey
@@ -87,6 +94,18 @@ class SmsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun markAllRead() {
+        // Okunmamış sayaçları hemen sıfırla; kalıcı sonuç yenilemeden gelir.
+        _conversations.update { list -> list.map { it.copy(unread = 0) } }
+        viewModelScope.launch(Dispatchers.IO) {
+            val error = runCatching { repo.markAllRead() }.exceptionOrNull()
+            if (error != null) {
+                withContext(Dispatchers.Main) { toast("Okundu yapılamadı: ${error.message}") }
+            }
+            runCatching { reload() }
+        }
+    }
+
     fun markNotSpam(item: SmsItem) {
         prefs.setLabel(item.id, Label.NORMAL, manual = true)
         prefs.addExample(Label.NORMAL, item.address, item.body)
@@ -113,6 +132,53 @@ class SmsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Spam klasöründeki mesajlardan yapay zekaya kural çıkartır; kullanıcı beğenmediklerini silebilir. */
+    fun generateRules() {
+        val key = prefs.apiKey
+        if (key.isBlank()) {
+            _ruleStatus.value = "Önce Ayarlar'dan DeepSeek API anahtarını gir."
+            return
+        }
+        val spamSamples = _spam.value
+            .distinctBy { it.body.take(40) }
+            .take(60)
+            .map { Example(Label.SPAM, it.address, it.body) }
+        if (spamSamples.isEmpty()) {
+            _ruleStatus.value = "Spam klasörü boş; kural çıkarılacak mesaj yok."
+            return
+        }
+        val normalSamples = allMessages
+            .filter { it.isInbox && it.label != Label.SPAM }
+            .distinctBy { senderKey(it.address) }
+            .take(15)
+            .map { Example(Label.NORMAL, it.address, it.body) }
+
+        _ruleStatus.value = "Kurallar çıkarılıyor..."
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = prefs.rules(RuleKind.AI_RULE)
+            val result = DeepSeekClient.generateRules(key, spamSamples, normalSamples, existing)
+            _ruleStatus.value = result.fold(
+                onSuccess = { rules ->
+                    val fresh = rules.filterNot { it in existing }
+                    fresh.forEach { prefs.addRule(RuleKind.AI_RULE, it) }
+                    _rules.value = allRules()
+                    if (fresh.isEmpty()) "Yeni kural bulunamadı." else "${fresh.size} yeni kural eklendi."
+                },
+                onFailure = { "Kural çıkarılamadı: ${it.message}" },
+            )
+        }
+    }
+
+    /** Bir göndereni spam listesinden çıkarır: engeli kaldırır ve izin verilenlere ekler. */
+    fun trustSender(address: String) {
+        val key = senderKey(address)
+        prefs.removeRule(RuleKind.BLOCKED_SENDER, key)
+        prefs.addRule(RuleKind.ALLOWED_SENDER, key)
+        _spam.update { list -> list.filterNot { senderKey(it.address) == key } }
+        _rules.value = allRules()
+        refresh()
+    }
+
     fun addRule(kind: RuleKind, value: String) {
         if (kind == RuleKind.BLOCKED_SENDER) {
             // Engellenen gönderenin mesajlarını hemen listeden kaldır; kalıcı sonuç yenilemeden gelir.
@@ -136,6 +202,7 @@ class SmsViewModel(application: Application) : AndroidViewModel(application) {
         val contacts = repo.loadContacts()
         val all = repo.loadMessages(contacts)
         _contacts.value = contacts
+        allMessages = all
         _conversations.value = repo.toConversations(all, contacts)
         _spam.value = all.filter { it.label == Label.SPAM }
     }

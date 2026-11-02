@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
@@ -34,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -51,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.burakkarakas.smsfilter.data.Conversation
 import com.burakkarakas.smsfilter.data.Label
+import com.burakkarakas.smsfilter.data.senderKey
 import com.burakkarakas.smsfilter.util.isDefaultSmsApp
 
 private enum class HomeTab(val title: String) {
@@ -73,6 +76,10 @@ fun HomeScreen(
     val loading by vm.loading.collectAsState()
     val isDefault = isDefaultSmsApp(LocalContext.current)
     var tab by remember { mutableStateOf(HomeTab.ALL) }
+    var spamBySender by remember { mutableStateOf(false) }
+    val spamSenders = spam.groupBy { senderKey(it.address) }.values
+        .map { it.first().address to it.size }
+        .sortedByDescending { it.second }
 
     val visible: List<Conversation> = when (tab) {
         HomeTab.ALL -> conversations.filter { it.label != Label.SPAM }
@@ -87,6 +94,11 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("Mesajlar", fontWeight = FontWeight.Bold) },
                 actions = {
+                    if (tab == HomeTab.UNREAD) {
+                        IconButton(onClick = { vm.markAllRead() }) {
+                            Icon(Icons.Default.DoneAll, contentDescription = "Hepsini okundu yap")
+                        }
+                    }
                     IconButton(onClick = onOpenFilters) {
                         Icon(Icons.Default.Block, contentDescription = "Filtreler")
                     }
@@ -139,14 +151,49 @@ fun HomeScreen(
                         }
                     }
                     if (tab == HomeTab.SPAM) {
-                        items(spam, key = { it.id }) { item ->
-                            ListRow(
-                                title = item.address,
-                                subtitle = item.body,
-                                date = item.date,
-                                unread = 0,
-                                onClick = { onOpenChat(item.address) },
-                            )
+                        item {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                FilterChip(
+                                    selected = !spamBySender,
+                                    onClick = { spamBySender = false },
+                                    label = { Text("Mesajlar") },
+                                )
+                                FilterChip(
+                                    selected = spamBySender,
+                                    onClick = { spamBySender = true },
+                                    label = { Text("Spamlenen numaralar (${spamSenders.size})") },
+                                )
+                            }
+                        }
+                        if (spamBySender) {
+                            items(spamSenders, key = { "sender_" + senderKey(it.first) }) { (address, count) ->
+                                ListRow(
+                                    title = address,
+                                    subtitle = "$count spam mesaj",
+                                    date = null,
+                                    unread = 0,
+                                    onClick = {},
+                                    trailing = {
+                                        TextButton(onClick = { vm.trustSender(address) }) { Text("Listeden çıkar") }
+                                    },
+                                )
+                            }
+                        } else {
+                            items(spam, key = { it.id }) { item ->
+                                ListRow(
+                                    title = item.address,
+                                    subtitle = item.body,
+                                    date = item.date,
+                                    unread = 0,
+                                    onClick = { onOpenChat(item.address) },
+                                    trailing = {
+                                        TextButton(onClick = { vm.markNotSpam(item) }) { Text("Geri al") }
+                                    },
+                                )
+                            }
                         }
                     } else {
                         items(visible, key = { it.address }) { conversation ->
@@ -183,9 +230,10 @@ private fun DefaultAppBanner(onOpenSettings: () -> Unit) {
 private fun ListRow(
     title: String,
     subtitle: String,
-    date: Long,
+    date: Long?,
     unread: Int,
     onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -206,11 +254,13 @@ private fun ListRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Text(
-                    text = formatTime(date),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (date != null) {
+                    Text(
+                        text = formatTime(date),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -227,6 +277,7 @@ private fun ListRow(
                 }
             }
         }
+        trailing?.invoke()
     }
 }
 
